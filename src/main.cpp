@@ -14,27 +14,26 @@ RtcDS3231<TwoWire> Rtc(Wire);
 
 #define countof(a) (sizeof(a) / sizeof(a[0]))
 
-void printDateTime(const RtcDateTime& dt)
-{
-    char date[11];
-    char time[9];
+void printDateTime(const RtcDateTime& dt) {
+  char date[11];
+  char time[9];
 
-    snprintf_P(date,
-            countof(date),
-            PSTR("%02u/%02u/%04u"),
-            dt.Day(),
-            dt.Month(),
-            dt.Year());
-    snprintf_P(time,
-            countof(time),
-            PSTR("%02u:%02u:%02u"),
-            dt.Hour(),
-            dt.Minute(),
-            dt.Second());
+  snprintf_P(date,
+          countof(date),
+          PSTR("%02u/%02u/%04u"),
+          dt.Day(),
+          dt.Month(),
+          dt.Year());
+  snprintf_P(time,
+          countof(time),
+          PSTR("%02u:%02u:%02u"),
+          dt.Hour(),
+          dt.Minute(),
+          dt.Second());
 
-    Serial.print(date); Serial.print(" "); Serial.println(time);
-    lcd.setCursor(8,0); lcd.print(time);
-    lcd.setCursor(6,1); lcd.print(date);
+  Serial.print(date); Serial.print(" "); Serial.println(time);
+  lcd.setCursor(8,0); lcd.print(time);
+  lcd.setCursor(6,1); lcd.print(date);
 }
 
 void setup() {
@@ -49,7 +48,38 @@ void setup() {
   Rtc.Begin();
   RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
   printDateTime(compiled);
-  Rtc.SetDateTime(compiled);
+
+  if (!Rtc.IsDateTimeValid())
+  {
+    Serial.println("RTC lost confidence in the DateTime!");
+    Rtc.SetDateTime(compiled);
+  }
+
+  if (!Rtc.GetIsRunning())
+  {
+    Serial.println("RTC was not actively running, starting now");
+    Rtc.SetIsRunning(true);
+  }
+
+  RtcDateTime now = Rtc.GetDateTime();
+  if (now < compiled)
+  {
+    Serial.println("RTC is older than compile time!  (Updating DateTime)");
+    Rtc.SetDateTime(compiled);
+  }
+  else if (now > compiled)
+  {
+    Serial.println("RTC is newer than compile time. (this is expected)");
+  }
+  else if (now == compiled)
+  {
+    Serial.println("RTC is the same as compile time! (not expected but all is fine)");
+  }
+
+  // never assume the Rtc was last configured by you, so
+  // just clear them to your needed state
+  Rtc.Enable32kHzPin(false);
+  Rtc.SetSquareWavePin(DS3231SquareWavePin_ModeNone);
 }
 
 void loop() {
@@ -64,6 +94,13 @@ void loop() {
 
   lcd.setCursor(0, 0); lcd.print((int) temperature); lcd.print("C");
   lcd.setCursor(0, 1); lcd.print((int) humidity); lcd.print("%");
+
+  if (!Rtc.IsDateTimeValid())
+  {
+    // Common Cuases:
+    //    1) the battery on the device is low or even missing and the power line was disconnected
+    Serial.println("RTC lost confidence in the DateTime!");
+  }
 
   RtcDateTime now = Rtc.GetDateTime();
   printDateTime(now);
