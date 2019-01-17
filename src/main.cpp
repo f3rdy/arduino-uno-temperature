@@ -3,7 +3,18 @@
 #include <SimpleDHT.h>
 #include <Wire.h>
 #include <RtcDS3231.h>
+#include <SPI.h>
 
+// TFT Display
+#include <Adafruit_GFX.h>    // Core graphics library
+#include <Adafruit_ST7735.h> // Hardware-specific library for ST7735
+#include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
+
+#define TFT_CS        13
+#define TFT_RST        5  // Or set to -1 and connect to Arduino RESET pin
+#define TFT_DC         6
+#define TFT_MOSI 4        // Data out
+#define TFT_SCLK 3        // Clock out
 
 #define CONNECTION_BAUD 57600
 #define PIN_DHT 2
@@ -11,6 +22,7 @@
 LiquidCrystal lcd(7, 8, 9, 10, 11, 12);
 SimpleDHT11   dht11(PIN_DHT);
 RtcDS3231<TwoWire> Rtc(Wire);
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
 
 #define countof(a) (sizeof(a) / sizeof(a[0]))
 
@@ -80,6 +92,15 @@ void setup() {
   // just clear them to your needed state
   Rtc.Enable32kHzPin(false);
   Rtc.SetSquareWavePin(DS3231SquareWavePin_ModeNone);
+
+  // TFT Display
+  tft.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
+  uint16_t time = millis();
+  tft.fillScreen(ST77XX_BLACK);
+  time = millis() - time;
+
+  tft.setTextWrap(false);
+  tft.fillScreen(ST77XX_BLACK);
 }
 
 void loop() {
@@ -104,6 +125,12 @@ void loop() {
 
   RtcDateTime now = Rtc.GetDateTime();
   printDateTime(now);
+
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setCursor(5, 30);
+  tft.setTextColor(ST77XX_YELLOW);
+  tft.setTextSize(4);
+  tft.print(temperature); tft.println("C");
 
   delay(1500);
 }
