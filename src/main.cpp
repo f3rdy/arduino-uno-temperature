@@ -1,136 +1,112 @@
-#include <Arduino.h>
-#include <LiquidCrystal.h>
-#include <SimpleDHT.h>
-#include <Wire.h>
-#include <RtcDS3231.h>
-#include <SPI.h>
+#include <OneWire.h>
 
-// TFT Display
-#include <Adafruit_GFX.h>    // Core graphics library
-#include <Adafruit_ST7735.h> // Hardware-specific library for ST7735
-#include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
+// OneWire DS18S20, DS18B20, DS1822 Temperature Example
+//
+// http://www.pjrc.com/teensy/td_libs_OneWire.html
+//
+// The DallasTemperature library can do all this work for you!
+// https://github.com/milesburton/Arduino-Temperature-Control-Library
 
-#define TFT_CS        13
-#define TFT_RST        5  // Or set to -1 and connect to Arduino RESET pin
-#define TFT_DC         6
-#define TFT_MOSI 4        // Data out
-#define TFT_SCLK 3        // Clock out
+OneWire  ds(10);  // on pin 10 (a 4.7K resistor is necessary)
 
-#define CONNECTION_BAUD 57600
-#define PIN_DHT 2
-
-LiquidCrystal lcd(7, 8, 9, 10, 11, 12);
-SimpleDHT11   dht11(PIN_DHT);
-RtcDS3231<TwoWire> Rtc(Wire);
-Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
-
-#define countof(a) (sizeof(a) / sizeof(a[0]))
-
-void printDateTime(const RtcDateTime& dt) {
-  char date[11];
-  char time[9];
-
-  snprintf_P(date,
-          countof(date),
-          PSTR("%02u/%02u/%04u"),
-          dt.Day(),
-          dt.Month(),
-          dt.Year());
-  snprintf_P(time,
-          countof(time),
-          PSTR("%02u:%02u:%02u"),
-          dt.Hour(),
-          dt.Minute(),
-          dt.Second());
-
-  Serial.print(date); Serial.print(" "); Serial.println(time);
-  lcd.setCursor(8,0); lcd.print(time);
-  lcd.setCursor(6,1); lcd.print(date);
+void setup(void) {
+  Serial.begin(9600);
 }
 
-void setup() {
-  Serial.begin(CONNECTION_BAUD);
-  pinMode(LED_BUILTIN, OUTPUT);
-  lcd.begin(16, 2);
+void loop(void) {
+  byte i;
+  byte present = 0;
+  byte type_s;
+  byte data[12];
+  byte addr[8];
+  float celsius, fahrenheit;
 
-  Serial.print("compiled: ");
-  Serial.print(__DATE__);
-  Serial.println(__TIME__);
-
-  Rtc.Begin();
-  RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
-  printDateTime(compiled);
-
-  if (!Rtc.IsDateTimeValid())
-  {
-    Serial.println("RTC lost confidence in the DateTime!");
-    Rtc.SetDateTime(compiled);
-  }
-
-  if (!Rtc.GetIsRunning())
-  {
-    Serial.println("RTC was not actively running, starting now");
-    Rtc.SetIsRunning(true);
-  }
-
-  RtcDateTime now = Rtc.GetDateTime();
-  if (now < compiled)
-  {
-    Serial.println("RTC is older than compile time!  (Updating DateTime)");
-    Rtc.SetDateTime(compiled);
-  }
-  else if (now > compiled)
-  {
-    Serial.println("RTC is newer than compile time. (this is expected)");
-  }
-  else if (now == compiled)
-  {
-    Serial.println("RTC is the same as compile time! (not expected but all is fine)");
-  }
-
-  // never assume the Rtc was last configured by you, so
-  // just clear them to your needed state
-  Rtc.Enable32kHzPin(false);
-  Rtc.SetSquareWavePin(DS3231SquareWavePin_ModeNone);
-
-  // TFT Display
-  tft.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
-  uint16_t time = millis();
-  tft.fillScreen(ST77XX_BLACK);
-  time = millis() - time;
-
-  tft.setTextWrap(false);
-  tft.fillScreen(ST77XX_BLACK);
-}
-
-void loop() {
-  byte temperature = 0;
-  byte humidity = 0;
-  int err = SimpleDHTErrSuccess;
-
-  if ((err = dht11.read(&temperature, &humidity, NULL)) != SimpleDHTErrSuccess) {
-    Serial.print("Read DHT11 failed, err="); Serial.println(err);delay(1000);
+  if ( !ds.search(addr)) {
+    Serial.println("No more addresses.");
+    Serial.println();
+    ds.reset_search();
+    delay(250);
     return;
   }
 
-  lcd.setCursor(0, 0); lcd.print((int) temperature); lcd.print("C");
-  lcd.setCursor(0, 1); lcd.print((int) humidity); lcd.print("%");
-
-  if (!Rtc.IsDateTimeValid())
-  {
-    // Common Cuases:
-    //    1) the battery on the device is low or even missing and the power line was disconnected
-    Serial.println("RTC lost confidence in the DateTime!");
+  Serial.print("ROM =");
+  for( i = 0; i < 8; i++) {
+    Serial.write(' ');
+    Serial.print(addr[i], HEX);
   }
 
-  RtcDateTime now = Rtc.GetDateTime();
-  printDateTime(now);
+  if (OneWire::crc8(addr, 7) != addr[7]) {
+      Serial.println("CRC is not valid!");
+      return;
+  }
+  Serial.println();
 
-  tft.fillScreen(ST77XX_BLACK);
-  tft.setCursor(5, 30);
-  tft.setTextColor(ST77XX_YELLOW);
-  tft.setTextSize(4);
-  tft.print(temperature); tft.println("C");
+  // the first ROM byte indicates which chip
+  switch (addr[0]) {
+    case 0x10:
+      Serial.println("  Chip = DS18S20");  // or old DS1820
+      type_s = 1;
+      break;
+    case 0x28:
+      Serial.println("  Chip = DS18B20");
+      type_s = 0;
+      break;
+    case 0x22:
+      Serial.println("  Chip = DS1822");
+      type_s = 0;
+      break;
+    default:
+      Serial.println("Device is not a DS18x20 family device.");
+      return;
+  }
 
-  delay(1500);
+  ds.reset();
+  ds.select(addr);
+  ds.write(0x44, 1);        // start conversion, with parasite power on at the end
+
+  delay(1000);     // maybe 750ms is enough, maybe not
+  // we might do a ds.depower() here, but the reset will take care of it.
+
+  present = ds.reset();
+  ds.select(addr);
+  ds.write(0xBE);         // Read Scratchpad
+
+  Serial.print("  Data = ");
+  Serial.print(present, HEX);
+  Serial.print(" ");
+  for ( i = 0; i < 9; i++) {           // we need 9 bytes
+    data[i] = ds.read();
+    Serial.print(data[i], HEX);
+    Serial.print(" ");
+  }
+  Serial.print(" CRC=");
+  Serial.print(OneWire::crc8(data, 8), HEX);
+  Serial.println();
+
+  // Convert the data to actual temperature
+  // because the result is a 16 bit signed integer, it should
+  // be stored to an "int16_t" type, which is always 16 bits
+  // even when compiled on a 32 bit processor.
+  int16_t raw = (data[1] << 8) | data[0];
+  if (type_s) {
+    raw = raw << 3; // 9 bit resolution default
+    if (data[7] == 0x10) {
+      // "count remain" gives full 12 bit resolution
+      raw = (raw & 0xFFF0) + 12 - data[6];
+    }
+  } else {
+    byte cfg = (data[4] & 0x60);
+    // at lower res, the low bits are undefined, so let's zero them
+    if (cfg == 0x00) raw = raw & ~7;  // 9 bit resolution, 93.75 ms
+    else if (cfg == 0x20) raw = raw & ~3; // 10 bit res, 187.5 ms
+    else if (cfg == 0x40) raw = raw & ~1; // 11 bit res, 375 ms
+    //// default is 12 bit resolution, 750 ms conversion time
+  }
+  celsius = (float)raw / 16.0;
+  fahrenheit = celsius * 1.8 + 32.0;
+  Serial.print("  Temperature = ");
+  Serial.print(celsius);
+  Serial.print(" Celsius, ");
+  Serial.print(fahrenheit);
+  Serial.println(" Fahrenheit");
 }
